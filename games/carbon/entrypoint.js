@@ -12,6 +12,7 @@ const { replaceStartupVariables } = require('./js/sections/replace_startup_varia
 const { updateOxide } = require('./js/sections/update_oxide');
 const { updateCarbon } = require('./js/sections/update_carbon');
 const { extensionDownload } = require('./js/sections/extension_download');
+const { carbonGitSync } = require('./js/sections/carbon_git_sync');
 const { spawn } = require('child_process');
 
 (async function main() {
@@ -57,6 +58,11 @@ const { spawn } = require('child_process');
     console.time('replace_startup_variables');
     let MODIFIED_STARTUP = replaceStartupVariables();
     console.timeEnd('replace_startup_variables');
+
+    // Sync the Carbon folder from git (before the framework update extracts over it)
+    console.time('carbon_git_sync');
+    carbonGitSync();
+    console.timeEnd('carbon_git_sync');
 
     // Update frameworks
     console.time('update_oxide');
