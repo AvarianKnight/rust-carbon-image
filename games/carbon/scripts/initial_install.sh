@@ -1,20 +1,25 @@
 #!/bin/bash
-# Initial install script (SteamCMD)
-# Server Files: /mnt/server
+# Rust Dedicated Server + Carbon installer for Pterodactyl
+# Server files: /mnt/server
 
 set -euo pipefail
 
 SRCDS_APPID=258550
+SERVER_DIR="/mnt/server"
+STEAMCMD_DIR="${SERVER_DIR}/steamcmd"
 
-## just in case someone removed the defaults.
-if [ "${STEAM_USER:-}" == "" ]; then
-    echo -e "steam user is not set."
-    echo -e "Using anonymous user."
-    STEAM_USER=anonymous
-    STEAM_PASS=""
-    STEAM_AUTH=""
+# Carbon's current Linux release archive.
+CARBON_URL="${CARBON_URL:-https://github.com/CarbonCommunity/Carbon.Core/releases/latest/download/Carbon.Linux.Release.tar.gz}"
+
+# Steam login is normally anonymous for Rust Dedicated Server.
+STEAM_USER="${STEAM_USER:-anonymous}"
+STEAM_PASS="${STEAM_PASS:-}"
+STEAM_AUTH="${STEAM_AUTH:-}"
+
+if [ "${STEAM_USER}" = "anonymous" ]; then
+    echo "Using anonymous Steam login."
 else
-    echo -e "user set to ${STEAM_USER}"
+    echo "Using configured Steam account: ${STEAM_USER}"
 fi
 
 ## clone the Carbon folder from git, if configured
@@ -109,29 +114,60 @@ install_carbon_repo() {
 mkdir -p /mnt/server
 clone_carbon_repo
 
-## download and install steamcmd
+echo "Preparing directories..."
+mkdir -p "${SERVER_DIR}"
+mkdir -p "${STEAMCMD_DIR}"
+mkdir -p "${SERVER_DIR}/steamapps"
+
+echo "Downloading SteamCMD..."
 cd /tmp
-mkdir -p /mnt/server/steamcmd
-curl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-tar -xzvf steamcmd.tar.gz -C /mnt/server/steamcmd
-mkdir -p /mnt/server/steamapps # Fix steamcmd disk write error when this folder is missing
-cd /mnt/server/steamcmd
+curl -fsSL \
+    -o steamcmd.tar.gz \
+    https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
 
-# SteamCMD fails otherwise for some reason, even running as root.
-# This is changed at the end of the install process anyways.
+tar -xzf steamcmd.tar.gz -C "${STEAMCMD_DIR}"
+rm -f steamcmd.tar.gz
+
+# SteamCMD can fail with a disk-write error if this does not exist.
+mkdir -p "${SERVER_DIR}/steamapps"
+
+# Pterodactyl normally expects this ownership at the end.
+# SteamCMD sometimes needs root ownership during install in this setup.
 chown -R root:root /mnt
-export HOME=/mnt/server
+export HOME="${SERVER_DIR}"
 
-echo "Using SteamCMD to download server files..."
-./steamcmd.sh +force_install_dir /mnt/server +login ${STEAM_USER} ${STEAM_PASS} ${STEAM_AUTH} +app_update ${SRCDS_APPID} ${EXTRA_FLAGS} validate +quit
+echo "Installing/updating Rust Dedicated Server..."
+cd "${STEAMCMD_DIR}"
 
-## set up 32 bit libraries
-mkdir -p /mnt/server/.steam/sdk32
-cp -v linux32/steamclient.so ../.steam/sdk32/steamclient.so
+./steamcmd.sh \
+    +force_install_dir "${SERVER_DIR}" \
+    +login "${STEAM_USER}" "${STEAM_PASS}" "${STEAM_AUTH}" \
+    +app_update "${SRCDS_APPID}" validate \
+    +quit
 
-## set up 64 bit libraries
-mkdir -p /mnt/server/.steam/sdk64
-cp -v linux64/steamclient.so ../.steam/sdk64/steamclient.so
-
-## swap in the Carbon clone now that the install has succeeded
+# Swap in the clone now that the game install succeeded; Carbon extracts over it below.
 install_carbon_repo
+
+echo "Installing/updating Carbon..."
+cd "${SERVER_DIR}"
+
+rm -f /tmp/Carbon.Linux.Release.tar.gz
+
+curl -fsSL \
+    -o /tmp/Carbon.Linux.Release.tar.gz \
+    "${CARBON_URL}"
+
+tar -xzf /tmp/Carbon.Linux.Release.tar.gz -C "${SERVER_DIR}"
+rm -f /tmp/Carbon.Linux.Release.tar.gz
+
+echo "Setting up Steam client compatibility libraries..."
+mkdir -p "${SERVER_DIR}/.steam/sdk32"
+mkdir -p "${SERVER_DIR}/.steam/sdk64"
+
+cp -fv "${STEAMCMD_DIR}/linux32/steamclient.so" \
+    "${SERVER_DIR}/.steam/sdk32/steamclient.so"
+
+cp -fv "${STEAMCMD_DIR}/linux64/steamclient.so" \
+    "${SERVER_DIR}/.steam/sdk64/steamclient.so"
+
+echo "Rust Dedicated Server and Carbon installation completed."

@@ -1,0 +1,386 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-11-05T00:35:45+00:00",
+    "name": "Rust - All In One 4.0 (Carbon Git)",
+    "author": "support@pterodactyl.io",
+    "description": "The only aim in Rust is to survive. To do this you will need to overcome struggles such as hunger, thirst and cold. Build a fire. Build a shelter. Kill animals for meat. Protect yourself from other players, and kill them for meat. Create alliances with other players and form a town. Do whatever it takes to survive.",
+    "features": [
+        "steam_disk_space"
+    ],
+    "docker_images": {
+        "ghcr.io/avarianknight/rust-carbon-image:production": "ghcr.io/avarianknight/rust-carbon-image:production",
+        "ghcr.io/avarianknight/rust-carbon-image:staging": "ghcr.io/avarianknight/rust-carbon-image:staging",
+        "ghcr.io/avarianknight/rust-carbon-image:beta": "ghcr.io/avarianknight/rust-carbon-image:beta"
+    },
+    "file_denylist": [],
+    "startup": "./RustDedicated -batchmode -nographics $( [ \"${FRAMEWORK}\" = \"oxide\" ] && printf %s \"+oxide.directory \\\"{{MODDING_ROOT}}\\\"\" || { [ \"${FRAMEWORK}\" = \"vanilla\" ] && printf %s \"\" || printf %s \"-carbon.rootdir \\\"{{MODDING_ROOT}}\\\"\"; } ) +server.port {{SERVER_PORT}} +server.queryport {{QUERY_PORT}} +server.identity \"{{SERVER_IDENTITY}}\" +server.gamemode \"{{GAMEMODE}}\" +rcon.port {{RCON_PORT}} +rcon.ip 0.0.0.0 +rcon.web true +server.hostname \\\"{{HOSTNAME}}\\\" +server.description \\\"{{DESCRIPTION}}\\\" +server.url \"{{SERVER_URL}}\" +server.headerimage \"{{SERVER_IMG}}\" +server.logoimage \"{{SERVER_LOGO}}\" +server.maxplayers {{MAX_PLAYERS}} +rcon.password \"{{RCON_PASS}}\" +server.saveinterval {{SAVEINTERVAL}} +app.port {{APP_PORT}} $( [ -z \"${MAP_URL}\" ] && printf %s \"+server.worldsize \\\"{{WORLD_SIZE}}\\\" +server.seed \\\"{{WORLD_SEED}}\\\"\" || printf %s \"+server.levelurl \\\"${MAP_URL}\\\"\" ) $( [ -n \"{{APP_PUBLIC_IP}}\" ] && printf %s \"+app.publicip \\\"{{APP_PUBLIC_IP}}\\\"\" ) $( [ -n \"{{SERVER_TAGS}}\" ] && printf %s \"+server.tags \\\"{{SERVER_TAGS}}\\\"\" ) $( d=\"${LOG_FILE:-logs/$(date +%Y-%m-%d-%H%M).log}\"; mkdir -p \"$(dirname \"$d\")\" ) -logfile \"${LOG_FILE:-logs/$(date +%Y-%m-%d-%H%M).log}\" {{ADDITIONAL_ARGS}}",
+    "config": {
+        "files": "{}",
+        "startup": "{\r\n    \"done\": \"Server startup complete\"\r\n}",
+        "logs": "{}",
+        "stop": "quit"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# Rust Dedicated Server + Carbon installer for Pterodactyl\n# Server files: /mnt/server\n\nset -euo pipefail\n\nSRCDS_APPID=258550\nSERVER_DIR=\"/mnt/server\"\nSTEAMCMD_DIR=\"${SERVER_DIR}/steamcmd\"\n\n# Carbon's current Linux release archive.\nCARBON_URL=\"${CARBON_URL:-https://github.com/CarbonCommunity/Carbon.Core/releases/latest/download/Carbon.Linux.Release.tar.gz}\"\n\n# Steam login is normally anonymous for Rust Dedicated Server.\nSTEAM_USER=\"${STEAM_USER:-anonymous}\"\nSTEAM_PASS=\"${STEAM_PASS:-}\"\nSTEAM_AUTH=\"${STEAM_AUTH:-}\"\n\nif [ \"${STEAM_USER}\" = \"anonymous\" ]; then\n    echo \"Using anonymous Steam login.\"\nelse\n    echo \"Using configured Steam account: ${STEAM_USER}\"\nfi\n\n## clone the Carbon folder from git, if configured\n## The existing folder is only replaced at the end, once everything else has succeeded.\nCARBON_GIT_URL=\"${CARBON_GIT_URL:-}\"\nCARBON_GIT_BRANCH=\"${CARBON_GIT_BRANCH:-}\"\nCARBON_GIT_KEY=\"${CARBON_GIT_KEY:-}\"\nMODDING_ROOT=\"${MODDING_ROOT:-carbon}\"\nGIT_KEY_PATH=\"/tmp/.carbon_git_key\"\nGIT_CLONE_DIR=\"\"\n\ncleanup_git() {\n    rm -f \"${GIT_KEY_PATH}\"\n    if [ -n \"${GIT_CLONE_DIR}\" ]; then rm -rf \"${GIT_CLONE_DIR}\"; fi\n}\ntrap cleanup_git EXIT\n\n# Variables are single-line, so accept the key in the same shapes as carbon_git_sync.js:\n# a file path, a PEM with real or literal \"\\n\" newlines, a PEM with newlines\n# flattened into spaces, or a base64-encoded PEM.\nnormalize_git_key() {\n    local val=\"$1\" header footer body file\n    if [[ \"${val}\" != *\"-----BEGIN\"* ]]; then\n        file=\"/mnt/server/${val#/home/container/}\"\n        if [ -f \"${file}\" ]; then\n            val=\"$(cat \"${file}\")\"\n        else\n            val=\"$(printf '%s' \"${val}\" | base64 -d 2>/dev/null || true)\"\n        fi\n    fi\n    val=\"${val//\\\\n/$'\\n'}\"\n    val=\"${val//$'\\r'/}\"\n    header=\"$(printf '%s\\n' \"${val}\" | grep -oE -- '-----BEGIN [A-Z0-9 ]+-----' | head -n 1 || true)\"\n    footer=\"$(printf '%s\\n' \"${val}\" | grep -oE -- '-----END [A-Z0-9 ]+-----' | head -n 1 || true)\"\n    if [ -z \"${header}\" ] || [ -z \"${footer}\" ]; then return 1; fi\n    body=\"${val#*\"${header}\"}\"\n    body=\"${body%%\"${footer}\"*}\"\n    printf '%s\\n' \"${header}\"\n    printf '%s\\n' ${body}\n    printf '%s\\n' \"${footer}\"\n}\n\nclone_carbon_repo() {\n    if [ -z \"${CARBON_GIT_URL}\" ]; then\n        return 0\n    fi\n    case \"$(echo \"${FRAMEWORK:-}\" | tr '[:upper:]' '[:lower:]')\" in\n        *carbon*) ;;\n        *) echo \"CARBON_GIT_URL is set but the framework is not Carbon. Skipping git clone.\"; return 0 ;;\n    esac\n    if [[ ! \"${MODDING_ROOT}\" =~ ^[A-Za-z0-9._-]+$ ]] || [ \"${MODDING_ROOT}\" = \".\" ] || [ \"${MODDING_ROOT}\" = \"..\" ]; then\n        echo \"MODDING_ROOT '${MODDING_ROOT}' must be a single folder name to use git clone.\"\n        return 1\n    fi\n\n    if ! command -v git >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1; then\n        echo \"Installing git and ssh client...\"\n        apt-get update && apt-get install -y git openssh-client\n    fi\n\n    mkdir -p /mnt/server/.ssh\n    chmod 700 /mnt/server/.ssh\n    local ssh_cmd=\"ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/mnt/server/.ssh/known_hosts\"\n    if [ -n \"${CARBON_GIT_KEY}\" ]; then\n        (umask 077; normalize_git_key \"${CARBON_GIT_KEY}\" > \"${GIT_KEY_PATH}\") || {\n            echo \"CARBON_GIT_KEY is set but could not be parsed as a private key.\"\n            return 1\n        }\n        ssh_cmd=\"ssh -i ${GIT_KEY_PATH} -o IdentitiesOnly=yes ${ssh_cmd#ssh }\"\n    fi\n\n    # Clone next to the target so the final move stays on the same filesystem\n    GIT_CLONE_DIR=\"/mnt/server/.carbon_git_clone\"\n    rm -rf \"${GIT_CLONE_DIR}\"\n    local args=(clone -q --depth 1)\n    if [ -n \"${CARBON_GIT_BRANCH}\" ]; then args+=(--branch \"${CARBON_GIT_BRANCH}\"); fi\n    echo \"Cloning ${MODDING_ROOT} folder from git...\"\n    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND=\"${ssh_cmd}\" git \"${args[@]}\" \"${CARBON_GIT_URL}\" \"${GIT_CLONE_DIR}\"\n    rm -f \"${GIT_KEY_PATH}\"\n}\n\ninstall_carbon_repo() {\n    if [ -z \"${GIT_CLONE_DIR}\" ]; then\n        return 0\n    fi\n    echo \"Replacing ${MODDING_ROOT} folder with the git clone. Files not in the repository are removed.\"\n    rm -rf \"/mnt/server/${MODDING_ROOT}\"\n    mv \"${GIT_CLONE_DIR}\" \"/mnt/server/${MODDING_ROOT}\"\n    GIT_CLONE_DIR=\"\"\n}\n\nmkdir -p /mnt/server\nclone_carbon_repo\n\necho \"Preparing directories...\"\nmkdir -p \"${SERVER_DIR}\"\nmkdir -p \"${STEAMCMD_DIR}\"\nmkdir -p \"${SERVER_DIR}/steamapps\"\n\necho \"Downloading SteamCMD...\"\ncd /tmp\ncurl -fsSL \\\n    -o steamcmd.tar.gz \\\n    https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\n\ntar -xzf steamcmd.tar.gz -C \"${STEAMCMD_DIR}\"\nrm -f steamcmd.tar.gz\n\n# SteamCMD can fail with a disk-write error if this does not exist.\nmkdir -p \"${SERVER_DIR}/steamapps\"\n\n# Pterodactyl normally expects this ownership at the end.\n# SteamCMD sometimes needs root ownership during install in this setup.\nchown -R root:root /mnt\nexport HOME=\"${SERVER_DIR}\"\n\necho \"Installing/updating Rust Dedicated Server...\"\ncd \"${STEAMCMD_DIR}\"\n\n./steamcmd.sh \\\n    +force_install_dir \"${SERVER_DIR}\" \\\n    +login \"${STEAM_USER}\" \"${STEAM_PASS}\" \"${STEAM_AUTH}\" \\\n    +app_update \"${SRCDS_APPID}\" validate \\\n    +quit\n\n# Swap in the clone now that the game install succeeded; Carbon extracts over it below.\ninstall_carbon_repo\n\necho \"Installing/updating Carbon...\"\ncd \"${SERVER_DIR}\"\n\nrm -f /tmp/Carbon.Linux.Release.tar.gz\n\ncurl -fsSL \\\n    -o /tmp/Carbon.Linux.Release.tar.gz \\\n    \"${CARBON_URL}\"\n\ntar -xzf /tmp/Carbon.Linux.Release.tar.gz -C \"${SERVER_DIR}\"\nrm -f /tmp/Carbon.Linux.Release.tar.gz\n\necho \"Setting up Steam client compatibility libraries...\"\nmkdir -p \"${SERVER_DIR}/.steam/sdk32\"\nmkdir -p \"${SERVER_DIR}/.steam/sdk64\"\n\ncp -fv \"${STEAMCMD_DIR}/linux32/steamclient.so\" \\\n    \"${SERVER_DIR}/.steam/sdk32/steamclient.so\"\n\ncp -fv \"${STEAMCMD_DIR}/linux64/steamclient.so\" \\\n    \"${SERVER_DIR}/.steam/sdk64/steamclient.so\"\n\necho \"Rust Dedicated Server and Carbon installation completed.\"\n",
+            "container": "ghcr.io/pterodactyl/installers:debian",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Server Name",
+            "description": "The name of your server in the public server list.",
+            "env_variable": "HOSTNAME",
+            "default_value": "A Rust Server",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:60",
+            "field_type": "text"
+        },
+        {
+            "name": "Description",
+            "description": "The description under your server title. Commonly used for rules & info. Use \\n for newlines.",
+            "env_variable": "DESCRIPTION",
+            "default_value": "Powered by Pterodactyl",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string",
+            "field_type": "text"
+        },
+        {
+            "name": "URL",
+            "description": "The URL for your server. This is what comes up when clicking the \"Visit Website\" button.",
+            "env_variable": "SERVER_URL",
+            "default_value": "http://pterodactyl.io",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|url",
+            "field_type": "text"
+        },
+        {
+            "name": "Max Players",
+            "description": "The maximum amount of players allowed in the server at once.",
+            "env_variable": "MAX_PLAYERS",
+            "default_value": "40",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Image",
+            "description": "The header image for the top of your server listing.",
+            "env_variable": "SERVER_IMG",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|url",
+            "field_type": "text"
+        },
+        {
+            "name": "RCON Port",
+            "description": "Port for RCON connections.",
+            "env_variable": "RCON_PORT",
+            "default_value": "28016",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "RCON Password",
+            "description": "RCON access password. Using a weak password will cause the server to not start. Set a strong password. You can generate a strong password here: https://randomkeygen.com/",
+            "env_variable": "RCON_PASS",
+            "default_value": "CHANGEME",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|regex:/^[\\w.-]*$/|max:64",
+            "field_type": "text"
+        },
+        {
+            "name": "Save Interval",
+            "description": "Sets the server’s auto-save interval in seconds.",
+            "env_variable": "SAVEINTERVAL",
+            "default_value": "60",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "Additional Arguments",
+            "description": "Add additional startup parameters to the server.",
+            "env_variable": "ADDITIONAL_ARGS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "App Port",
+            "description": "Port for the Rust+ App. -1 to disable.",
+            "env_variable": "APP_PORT",
+            "default_value": "28082",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Logo",
+            "description": "The circular server logo for the Rust+ app.",
+            "env_variable": "SERVER_LOGO",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|url",
+            "field_type": "text"
+        },
+        {
+            "name": "Custom Map URL",
+            "description": "Overwrites the map with the one from the direct download URL. Invalid URLs will cause the server to crash.",
+            "env_variable": "MAP_URL",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|url",
+            "field_type": "text"
+        },
+        {
+            "name": "Level",
+            "description": "The world file for Rust to use.",
+            "env_variable": "LEVEL",
+            "default_value": "Procedural Map",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:20",
+            "field_type": "text"
+        },
+        {
+            "name": "World Size",
+            "description": "The world size for a procedural map.",
+            "env_variable": "WORLD_SIZE",
+            "default_value": "3000",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "World Seed",
+            "description": "The seed for a procedural map.",
+            "env_variable": "WORLD_SEED",
+            "default_value": "1234",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Query Port",
+            "description": "Server Query Port. Can't be the same as Game's primary port.",
+            "env_variable": "QUERY_PORT",
+            "default_value": "27017",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "Modding Framework",
+            "description": "The modding framework to be used: carbon, oxide, vanilla.\r\nDefaults to \"vanilla\" for a non-modded server installation.",
+            "env_variable": "FRAMEWORK",
+            "default_value": "carbon",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|in:Vanilla,Oxide,Carbon,Carbon-Minimal",
+            "field_type": "text"
+        },
+        {
+            "name": "Version",
+            "description": "Choose which beta version to use for your server. Public is the current version of Rust and should be used for live servers unless you're running a staging server of some sort.",
+            "env_variable": "VERSION",
+            "default_value": "public",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|in:public,release,staging,aux01-staging,aux02",
+            "field_type": "text"
+        },
+        {
+            "name": "Modding Root Directory",
+            "description": "The root directory of your modding framework - If using carbon, this should be set to carbon. If using oxide, this should've set to oxide.",
+            "env_variable": "MODDING_ROOT",
+            "default_value": "carbon",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Tags",
+            "description": "Server tags allow your server to be categorized. There is a list below of all tags. Separate each tag with a comma such as: weekly,NA,vanilla | All available server tags are listed here: https://wiki.facepunch.com/rust/server-browser-tags",
+            "env_variable": "SERVER_TAGS",
+            "default_value": "vanilla",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Identity",
+            "description": "The directory of your server. Default is set to rust.",
+            "env_variable": "SERVER_IDENTITY",
+            "default_value": "rust",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Auto Update",
+            "description": "Determines if the server with automatically update on start.",
+            "env_variable": "AUTO_UPDATE",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Chaos Code Extension",
+            "description": "Download and use the ChaosCode extension?",
+            "env_variable": "CHAOS_EXT",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Discord Extension",
+            "description": "Download and use the Discord Extension?",
+            "env_variable": "DISCORD_EXT",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "RustEdit Extension",
+            "description": "Download and install the RustEdit Extension?",
+            "env_variable": "RUSTEDIT_EXT",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Validate Game Files",
+            "description": "Determine if you want the server to validate the game files every time the server starts.",
+            "env_variable": "VALIDATE",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "App Public IP",
+            "description": "Unless you know what you're doing, leave this field blank. This is very important! Please do not change this unless you have read the Rust+ App documentation here: https://wiki.facepunch.com/rust/rust-companion-server",
+            "env_variable": "APP_PUBLIC_IP",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": "nullable|string|max:15",
+            "field_type": "text"
+        },
+        {
+            "name": "Framework Update",
+            "description": "Disable installation / update of any chosen framework.",
+            "env_variable": "FRAMEWORK_UPDATE",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Gamemode",
+            "description": "Gamemode of Rust - Choose between none (default),vanilla,survival,softcore,hardcore",
+            "env_variable": "GAMEMODE",
+            "default_value": "vanilla",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Log File Location",
+            "description": "Choose a location to log your console outputs. Leave blank to disable.",
+            "env_variable": "LOG_FILE",
+            "default_value": "logs/$(date +%Y-%m-%d-%H%M).log",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Debug Mode",
+            "description": "Do you want to enable the egg's debug mode?",
+            "env_variable": "EGG_DEBUG",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Mono Logging",
+            "description": "Outputs all mono logs to a file. This is a developer only tool to troubleshoot and should not be ran in a production server. Outputs are logged into mono-debug.log as well as the Pterodactyl terminal.",
+            "env_variable": "MONO_LOGGING",
+            "default_value": "0",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|boolean",
+            "field_type": "text"
+        },
+        {
+            "name": "Carbon Git URL",
+            "description": "Private or public repository holding the Carbon folder, e.g. git@github.com:you/carbon.git. Leave empty to disable. WARNING: reinstalling with this set deletes everything in the Carbon folder that is not in the repository. Tracked files are reset to the repository on every boot.",
+            "env_variable": "CARBON_GIT_URL",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Carbon Git Branch",
+            "description": "Branch to use. Leave empty for the repository's default branch.",
+            "env_variable": "CARBON_GIT_BRANCH",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:255",
+            "field_type": "text"
+        },
+        {
+            "name": "Carbon Git Private Key",
+            "description": "SSH private key for the repository; use a read-only deploy key. Paste it with line breaks flattened to spaces or as \\n, base64-encode it, or give a file path under /home/container. Leave empty for public repositories.",
+            "env_variable": "CARBON_GIT_KEY",
+            "default_value": "",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "nullable|string",
+            "field_type": "text"
+        }
+    ]
+}

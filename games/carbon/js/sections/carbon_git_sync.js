@@ -45,6 +45,10 @@ function carbonGitSync() {
   Debug('-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=');
   Debug('Inside of /sections/carbon_git_sync.js');
 
+  // The environment is passed on to the game server, so plugins must not inherit the key
+  const rawKey = process.env.CARBON_GIT_KEY || '';
+  delete process.env.CARBON_GIT_KEY;
+
   const url = (process.env.CARBON_GIT_URL || '').trim();
   if (!url) {
     Success('No Carbon git repository set. Skipping this part...');
@@ -75,7 +79,6 @@ function carbonGitSync() {
   try {
     fs.mkdirSync(path.dirname(KNOWN_HOSTS), { recursive: true, mode: 0o700 });
 
-    const rawKey = process.env.CARBON_GIT_KEY || '';
     if (rawKey.trim()) {
       const key = normalizeKey(rawKey);
       if (!key) {
