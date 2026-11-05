@@ -22,97 +22,25 @@ else
     echo "Using configured Steam account: ${STEAM_USER}"
 fi
 
-## clone the Carbon folder from git, if configured
-## The existing folder is only replaced at the end, once everything else has succeeded.
+## Carbon folder from git, if configured. The clone itself happens at first boot
+## (js/sections/carbon_git_sync.js): the runtime image ships git and ssh, and this
+## install container can't reliably get ssh. It clones into an empty folder, so
+## this script only moves the old folder aside and leaves Carbon to the boot update.
 CARBON_GIT_URL="${CARBON_GIT_URL:-}"
-CARBON_GIT_BRANCH="${CARBON_GIT_BRANCH:-}"
-CARBON_GIT_KEY="${CARBON_GIT_KEY:-}"
 MODDING_ROOT="${MODDING_ROOT:-carbon}"
-GIT_KEY_PATH="/tmp/.carbon_git_key"
-GIT_CLONE_DIR=""
-
-cleanup_git() {
-    rm -f "${GIT_KEY_PATH}"
-    if [ -n "${GIT_CLONE_DIR}" ]; then rm -rf "${GIT_CLONE_DIR}"; fi
-}
-trap cleanup_git EXIT
-
-# Variables are single-line, so accept the key in the same shapes as carbon_git_sync.js:
-# a file path, a PEM with real or literal "\n" newlines, a PEM with newlines
-# flattened into spaces, or a base64-encoded PEM.
-normalize_git_key() {
-    local val="$1" header footer body file
-    if [[ "${val}" != *"-----BEGIN"* ]]; then
-        file="/mnt/server/${val#/home/container/}"
-        if [ -f "${file}" ]; then
-            val="$(cat "${file}")"
-        else
-            val="$(printf '%s' "${val}" | base64 -d 2>/dev/null || true)"
-        fi
-    fi
-    val="${val//\\n/$'\n'}"
-    val="${val//$'\r'/}"
-    header="$(printf '%s\n' "${val}" | grep -oE -- '-----BEGIN [A-Z0-9 ]+-----' | head -n 1 || true)"
-    footer="$(printf '%s\n' "${val}" | grep -oE -- '-----END [A-Z0-9 ]+-----' | head -n 1 || true)"
-    if [ -z "${header}" ] || [ -z "${footer}" ]; then return 1; fi
-    body="${val#*"${header}"}"
-    body="${body%%"${footer}"*}"
-    printf '%s\n' "${header}"
-    printf '%s\n' ${body}
-    printf '%s\n' "${footer}"
-}
-
-clone_carbon_repo() {
-    if [ -z "${CARBON_GIT_URL}" ]; then
-        return 0
-    fi
+USE_CARBON_GIT=0
+if [ -n "${CARBON_GIT_URL}" ]; then
     case "$(echo "${FRAMEWORK:-}" | tr '[:upper:]' '[:lower:]')" in
-        *carbon*) ;;
-        *) echo "CARBON_GIT_URL is set but the framework is not Carbon. Skipping git clone."; return 0 ;;
+        *carbon*)
+            if [[ "${MODDING_ROOT}" =~ ^[A-Za-z0-9._-]+$ ]] && [ "${MODDING_ROOT}" != "." ] && [ "${MODDING_ROOT}" != ".." ]; then
+                USE_CARBON_GIT=1
+            else
+                echo "WARNING: MODDING_ROOT '${MODDING_ROOT}' must be a single folder name to use git. Ignoring CARBON_GIT_URL."
+            fi
+            ;;
+        *) echo "WARNING: CARBON_GIT_URL is set but the framework is not Carbon. Ignoring it." ;;
     esac
-    if [[ ! "${MODDING_ROOT}" =~ ^[A-Za-z0-9._-]+$ ]] || [ "${MODDING_ROOT}" = "." ] || [ "${MODDING_ROOT}" = ".." ]; then
-        echo "MODDING_ROOT '${MODDING_ROOT}' must be a single folder name to use git clone."
-        return 1
-    fi
-
-    if ! command -v git >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1; then
-        echo "Installing git and ssh client..."
-        apt-get update && apt-get install -y git openssh-client
-    fi
-
-    mkdir -p /mnt/server/.ssh
-    chmod 700 /mnt/server/.ssh
-    local ssh_cmd="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/mnt/server/.ssh/known_hosts"
-    if [ -n "${CARBON_GIT_KEY}" ]; then
-        (umask 077; normalize_git_key "${CARBON_GIT_KEY}" > "${GIT_KEY_PATH}") || {
-            echo "CARBON_GIT_KEY is set but could not be parsed as a private key."
-            return 1
-        }
-        ssh_cmd="ssh -i ${GIT_KEY_PATH} -o IdentitiesOnly=yes ${ssh_cmd#ssh }"
-    fi
-
-    # Clone next to the target so the final move stays on the same filesystem
-    GIT_CLONE_DIR="/mnt/server/.carbon_git_clone"
-    rm -rf "${GIT_CLONE_DIR}"
-    local args=(clone -q --depth 1)
-    if [ -n "${CARBON_GIT_BRANCH}" ]; then args+=(--branch "${CARBON_GIT_BRANCH}"); fi
-    echo "Cloning ${MODDING_ROOT} folder from git..."
-    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${ssh_cmd}" git "${args[@]}" "${CARBON_GIT_URL}" "${GIT_CLONE_DIR}"
-    rm -f "${GIT_KEY_PATH}"
-}
-
-install_carbon_repo() {
-    if [ -z "${GIT_CLONE_DIR}" ]; then
-        return 0
-    fi
-    echo "Replacing ${MODDING_ROOT} folder with the git clone. Files not in the repository are removed."
-    rm -rf "/mnt/server/${MODDING_ROOT}"
-    mv "${GIT_CLONE_DIR}" "/mnt/server/${MODDING_ROOT}"
-    GIT_CLONE_DIR=""
-}
-
-mkdir -p /mnt/server
-clone_carbon_repo
+fi
 
 echo "Preparing directories..."
 mkdir -p "${SERVER_DIR}"
@@ -145,20 +73,28 @@ cd "${STEAMCMD_DIR}"
     +app_update "${SRCDS_APPID}" validate \
     +quit
 
-# Swap in the clone now that the game install succeeded; Carbon extracts over it below.
-install_carbon_repo
+if [ "${USE_CARBON_GIT}" = "1" ]; then
+    # Only reached once the game install succeeded, so a failed install keeps the old folder.
+    CARBON_DIR="${SERVER_DIR}/${MODDING_ROOT}"
+    if [ -d "${CARBON_DIR}" ] && [ -n "$(ls -A "${CARBON_DIR}")" ]; then
+        CARBON_BACKUP="${CARBON_DIR}.old-$(date +%Y%m%d-%H%M%S)"
+        echo "Moving existing ${MODDING_ROOT} folder to ${CARBON_BACKUP##*/}. Delete it once you no longer need it."
+        mv "${CARBON_DIR}" "${CARBON_BACKUP}"
+    fi
+    echo "${MODDING_ROOT} folder will be cloned from git, and Carbon installed, on first boot."
+else
+    echo "Installing/updating Carbon..."
+    cd "${SERVER_DIR}"
 
-echo "Installing/updating Carbon..."
-cd "${SERVER_DIR}"
+    rm -f /tmp/Carbon.Linux.Release.tar.gz
 
-rm -f /tmp/Carbon.Linux.Release.tar.gz
+    curl -fsSL \
+        -o /tmp/Carbon.Linux.Release.tar.gz \
+        "${CARBON_URL}"
 
-curl -fsSL \
-    -o /tmp/Carbon.Linux.Release.tar.gz \
-    "${CARBON_URL}"
-
-tar -xzf /tmp/Carbon.Linux.Release.tar.gz -C "${SERVER_DIR}"
-rm -f /tmp/Carbon.Linux.Release.tar.gz
+    tar -xzf /tmp/Carbon.Linux.Release.tar.gz -C "${SERVER_DIR}"
+    rm -f /tmp/Carbon.Linux.Release.tar.gz
+fi
 
 echo "Setting up Steam client compatibility libraries..."
 mkdir -p "${SERVER_DIR}/.steam/sdk32"

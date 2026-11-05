@@ -14,8 +14,15 @@ function frameworkFlag() {
   return `-beta ${branch}`;
 }
 
+function requireSteamCmd() {
+  if (!fs.existsSync('/home/container/steamcmd/steamcmd.sh')) {
+    throw new Error('steamcmd/steamcmd.sh is missing, so the server install did not complete. Check the install log and reinstall the server.');
+  }
+}
+
 async function SteamCMD_Validate() {
   Debug('Inside Function: SteamCMD_Validate()');
+  requireSteamCmd();
   deleteSteamApps();
   const flag = frameworkFlag();
   const label = flag ? `${flag.replace('-beta ', 'Aux').toUpperCase()} Files` : 'Default Files';
@@ -25,6 +32,7 @@ async function SteamCMD_Validate() {
 
 async function SteamCMD_No_Validation() {
   Debug('Inside Function: SteamCMD_No_Validation()');
+  requireSteamCmd();
   const flag = frameworkFlag();
   const label = flag ? `${flag.replace('-beta ', 'Aux').toUpperCase()} Files` : 'Default Files';
   Info(`Downloading ${label} - Validation Off!`);
