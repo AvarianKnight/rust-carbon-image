@@ -6,6 +6,7 @@ const { Info, Debug, Success, Error, Warn } = require('../helpers/messages');
 // Key lives on the container's ephemeral filesystem, never in the server volume
 const KEY_PATH = '/tmp/.carbon_git_key';
 const KNOWN_HOSTS = '/home/container/.ssh/known_hosts';
+const PASSWD_PATH = '/tmp/.carbon_git_passwd';
 
 // Pterodactyl variables are single-line, so accept the key in several shapes:
 // a file path under /home/container, a PEM with real or literal "\n" newlines,
@@ -29,6 +30,16 @@ function normalizeKey(raw) {
   if (!m) return '';
   const body = m[2].trim().split(/\s+/).join('\n');
   return `${m[1]}\n${body}\n${m[3]}\n`;
+}
+
+// Wings runs the container as a uid that isn't in /etc/passwd, and ssh refuses to
+// start without an entry, so give git and ssh one through nss_wrapper.
+function passwdEnv() {
+  const uid = process.getuid();
+  const known = fs.readFileSync('/etc/passwd', 'utf8').split('\n').some(l => l.split(':')[2] === String(uid));
+  if (known) return {};
+  fs.writeFileSync(PASSWD_PATH, `container:x:${uid}:${process.getgid()}::/home/container:/bin/sh\n`);
+  return { LD_PRELOAD: 'libnss_wrapper.so', NSS_WRAPPER_PASSWD: PASSWD_PATH, NSS_WRAPPER_GROUP: '/etc/group' };
 }
 
 function git(args, opts = {}) {
@@ -90,6 +101,7 @@ function carbonGitSync() {
       sshOpts.unshift('-i', KEY_PATH, '-o', 'IdentitiesOnly=yes');
     }
     env.GIT_SSH_COMMAND = `ssh ${sshOpts.join(' ')}`;
+    Object.assign(env, passwdEnv());
 
     const run = (args) => git(args, { cwd: target, env });
 
@@ -129,6 +141,7 @@ function carbonGitSync() {
     Warn(`Continuing startup with the existing ${root} folder.`);
   } finally {
     try { fs.rmSync(KEY_PATH, { force: true }); } catch {}
+    try { fs.rmSync(PASSWD_PATH, { force: true }); } catch {}
   }
 
   if (process.env.FRAMEWORK_UPDATE !== '1' && !fs.existsSync(`${target}/managed/Carbon.Preloader.dll`)) {

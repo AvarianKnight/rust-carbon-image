@@ -33,7 +33,7 @@ ENV         DEBIAN_FRONTEND=noninteractive
 RUN         dpkg --add-architecture i386 \
             && apt update \
             && apt upgrade -y \
-            && apt install -y lib32gcc-s1 lib32stdc++6 unzip curl iproute2 tzdata libgdiplus libsdl2-2.0-0:i386 jq util-linux gcc libc6-dev git openssh-client \
+            && apt install -y lib32gcc-s1 lib32stdc++6 unzip curl iproute2 tzdata libgdiplus libsdl2-2.0-0:i386 jq util-linux gcc libc6-dev git openssh-client libnss-wrapper \
             && rm -rf /var/lib/apt/lists/*
 
 # Install NodeJS
