@@ -11,9 +11,13 @@ on:
     paths:
       - 'games/**'
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   push:
-    name: "aioegg:${{ github.ref_name }}"
+    name: "rust-carbon-image:${{ github.ref_name }}"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,4 +36,4 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/sturdystubs/aioegg:${{ github.ref_name }}
+            ghcr.io/avarianknight/rust-carbon-image:${{ github.ref_name }}

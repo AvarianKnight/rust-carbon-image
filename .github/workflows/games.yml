@@ -8,6 +8,10 @@ on:
       - main
     paths:
       - games/**
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   push:
     name: "games:${{ matrix.game }}"
@@ -34,4 +38,4 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/sturdystubs/games:${{ matrix.game }}
+            ghcr.io/avarianknight/games:${{ matrix.game }}

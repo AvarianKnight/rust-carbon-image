@@ -7,9 +7,13 @@ on:
     paths:
       - games/**
   workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   push:
-    name: "aioegg:beta"
+    name: "rust-carbon-image:beta"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,4 +32,4 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/sturdystubs/aioegg:beta
+            ghcr.io/avarianknight/rust-carbon-image:beta
